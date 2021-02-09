@@ -1,0 +1,1218 @@
+---
+title: "Rmarkdown for: *Polygenic risk scores – from basic science to clinical application: a primer* (Published in JAMA Psychiatry) by  Wray, Lin, Austin, Hickie, McGrath, Murray & Visscher"
+author: "by Tian Lin & Naomi Wray (naomi.wray@uq.edu.au) - `r format(Sys.time(), '%d %B %Y')`"
+output:
+ html_document:
+   toc: TRUE
+   code_folding: "hide"
+   number_sections: TRUE
+   
+#output:
+#  pdf_document:
+#    toc: true
+#   highlight: tango
+#    number_sections: true
+   
+
+---
+The purpose of this Supplementary Material is to provide R code for making polygenic risk score (PRS) theory calculations and to generate the Figures provided in the manuscript (and Figures that didnt make it into the manuscript). Hopefully, this is useful for students and for teaching material. The is the pdf output from the RMarkdown script. The Rmarkdown file can be downloaded from https://cnsgenomics.com/content/software or https://github.com/CNSGenomics
+\pagebreak
+```{r, message=FALSE, warning=FALSE, eval = T}
+# You need these libraries to run this template:
+library(rmarkdown)    # install.packages("rmarkdown") 
+#library(epuRate)      # devtools::install_github("holtzy/epuRate", force=TRUE)
+library(dplyr)
+library(scales)
+
+library(tidyverse)
+library(gridExtra)
+library(grid)
+library(viridis)
+library(emojifont)
+load.fontawesome()
+library(ggplot2)
+library(ggpubr)
+library(patchwork)
+```
+# Baseline calculations for Figure 1; n alleles example 
+## Basic model
+In Figure 1, we visualise polygenic disease assuming that 900 independent causal DNA variants contribute to disease risk, for a disease of lifetime risk 1% and heritability 70%. The code to generate the data for that Figure is provided in Section 3.
+
+Here we provide some basic calculations:
+We assume  
+$n$ = 900 : number of DNA variants (these could be single nucleoptide polymorphisms, SNPs, or other variants)   
+$p$ = 0.1 : frequency of each risk associated variant, risk allele frequency; hence the protective allele frequency is (1-p)=0.9. Risk and protective alleles are relative terms    
+$h^2$ = 0.7 : total proportion of variance in liability explained by the 900 risk alleles   
+$r^2$ = 0.1 : total proportion of variance in liability explained by the PRS   
+
+We assume 900 DNA variants contribute to disease, this is just a convenient number as it allows a 30x30 square.
+Most polygenic diseases have 1000's of DNA variants contributing, obviously the higher the number of contributing DNA variants the lower the expected effect size per variant. We assume that the frequency of the risk allele at each DNA variant is 0.1 and that the effect of a DNA variant is the same for all DNA variants. Again, this is for convenience. If we were to make our toy example more general by allowing risk allele frequencies to differ and effect sizes to differ, then the take-home messages are the same. Moreover in genetic studies, the key parameter is the variance explained by the DNA variant, which is a function of the allele frequency ($p$) and the effect size ($\beta$) together ($2p(1-p)\beta^2$); many combination of allele frequency and efect size give the same variance explained.
+
+At each DNA variant, people in the population can be homozygous for the protective alleles with frequency $(1-p)^2$, or 81% when p=0.1,  or heterozygous with frequency $2p(1-p)$, or 18% when p=0.1, or homozygous for the risk alleles with $p^2$,  or 1% when p=0.1
+
+In Figure 1, the red dots are the DNA variants where a person is homozygous for the risk alleles.
+In 900 DNA variants we expect (that is, on average in the population), each person to be homozygous for risk alleles at 9 of the 900 DNA variants. 
+
+## Mean and variance of number of risk alleles
+Using binomial distribution theory, we can work out that an average person in the population carries $2np$ = 2x 900 x 0.1 = 180 risk alleles, the two comes in because we each have two chromosomes. The variance is $2np(1-p)$ = 2 x 900 x 0.1 x 0.9 = 162, and so the standard deviation of number of risk alleles in this toy example is sqrt(162) = 13, and 95% confidence interval, i.e the likely range of the count of the risk allele variants in the population is: 155 to 205 risk alleles. Of course 2.5% of the population have more risk alleles than this, and these people are at particuarly high risk of disease, for a disease with lifetime risk of 1% (hence they feature in the top row of Figure 1). This code provides this calculations (for the rest of the pdf the code has been mostly hidden).
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8}
+#Parameters to define the disease
+n = 900
+p = 0.1
+h2 = 0.7
+r2= 0.1
+K = 0.01
+
+# Population values
+Meana= 2*n*p
+Va= 2*n * p * (1-p)
+SDa= sqrt(Va)
+L95 = Meana-1.96*SDa
+U95 = Meana+1.96*SDa
+LSD = Meana-3.5*SDa
+USD = Meana+3.5*SDa
+
+```
+
+Mean number or risk alleles is `r Meana` when there are `r n` DNA variants each of frequency `r p`.  
+Variance in number of risk alleles is `r Va` and standard deviation `r round(SDa,1)`.  
+95% CI range `r round(L95,0)` to `r round(U95,0)`.    
+Maximum range +/- 3.5SD `r round(LSD,0)` to `r round(USD,0)`.  
+            
+## Within family variance
+In  human  genetics one of the most under-recognised features of polygenic traits is that the genetic variance within families is half of the genetic variance in the population. This can be shown by considering the genetic values of a child (Achild). Across children from the same pair of parents, their average genetic value is the  mean of their parents, i.e. 0.5(Amum + Adad). But the genetic value of an individual child, can be described as this mean value, plus the segregation value for the particular child, which reflects the deviation from this mean (Aseg-child).
+Achild = 0.5(Amum + Adad) + Aseg-child
+If we then think about the genetic variance of a generation of children from different families:
+V(Achild) = 0.25Var(Amum) + 0.25Var(Adad) + Var(Aseg-child)
+the terms are assumed to be independent - certainly the Aseg-child deviation is,  by definition, independent of the parental values. The parental genetic values are correlated in the  context of assortative mating, that doesnt impact the discussion here,which is about within family variance (this is not affected by assortative mating, but is impacted by inbreeding).
+
+Under basic assumptions, the genetic variance of the child generation should be the same at the genetic variance of the parental generations, and the genetic variation in females is the same as males, then V(Achild) = V(Amum) = V(Adad) = V(A), where V(A) is genetic variation in the population, so then
+V(Aseg-child) = V(Achild) - 0.25Var(Amum) + 0.25Var(Adad) = 0.5V(A)
+
+There is a lot of genetic variation hidden in our genomes, half of the genetic variation in population is found between the children of any pair of parents. 
+
+Validation of this theory and modelling has been demonstrated by selection experiments (that exploit the variation generated through segregation) which selected for change in mean phenotype over generations and which were designed to see if response to selection fitted expectations predicted by polygenic models.
+
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8}
+# Within-family variance
+Vaw= 0.5*Va
+SDaw= sqrt(Vaw)
+L95aw=Meana-1.96*SDaw
+U95aw=Meana+1.96*SDaw
+LSDaw = Meana-3.5*SDaw
+USDaw = Meana+3.5*SDaw
+UL95 = U95-L95
+UL95aw = U95aw-L95aw
+ULSD = USD-LSD
+ULSDaw = USDaw-LSDaw
+
+```
+
+95%CI range in population when n.allele =`r n` and risk allele frequency is `r p`: `r round(UL95,0)`.  
+95%CI range  *within* families when n.allele=`r n` and risk allele frequency is `r p`: `r round(UL95aw,0)`.  
++/-3 SD range in population when n.allele=`r n` and risk allele frequency is `r p`: `r round(ULSD,0)`.  
++/-3 SD range *within* families when n.allele=`r n` and risk allele frequency is `r p`: `r round(ULSDaw,0)`.  
+
+## Simulating disease status for an individual
+This code just shows how to simulate the disease status for an individual, for a disease underpinned by $n$ DNA risk variants each of frequency $p$, for a disease of lifetime risk $K$ and heritability $h^2$.
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8, linewidth=60}
+Va=2*n*p*(1-p) # genetic variance, we use VA not VG out of convention because we are only 
+               # considering addition genetic effects
+Vp=Va/h2  # since h2= VA/VP, hence VP=VA/h2; h2 was an input parameter
+Ve=Vp-Va  # residual variance; by convention we use VE, with E for environment, but this 
+          # mostly non-indentifiable random effect
+tr=-qnorm(K) # normal threshold for K proportion of 
+             # population having disease
+ 
+```
+
+Simulated individual, for disease of lifetime risk `r K*100`%, and heritability `r h2*100`%.
+Count of homozygous protective, heterozygous, homozygous risk:
+
+```{r, linewidth=60}
+D=0
+disease_status="UNAFFECTED"
+allele = rbinom(n,2,p)  # simulate n DNA variants with risk alleles having frequency p, 
+                        # 2 chromosomes
+tab_allele=table(allele)
+tab_allele
+S=tab_allele[2]+2*tab_allele[3]  
+E=rnorm(1,0,sqrt(Ve))  # residual value for individual
+ESDU=E/sqrt(Ve) # residual value in residual SD units
+ASDU=(S-2*n*p)/sqrt(Va) # genetic value in genetic SD units
+APSDU=ASDU*sqrt(h2) # genetic value in phenotypic SD units
+EPSDU=ESDU*sqrt(1-h2) # residual value in phenotypic SD units
+PSDU=(S+E-2*n*p)/sqrt(Vp)  # phenotypic value in SD units
+if(PSDU>tr){D=1;disease_status="AFFECTED"} 
+# assign disease status to be 1 id the Phenotypic liability is greater than the threshold
+    
+```      
+
+This individual has `r S` risk alleles across `r n` DNA variants (`r tab_allele[2]` +2* `r tab_allele[3] `), where risk alleles have frequency `r p`. Scaled in terms of liability SD units, this genetic value is `r round(ASDU,2)` genetic liability SD units or `r round(APSDU,2)` phenotypic SD units.  
+The non-genetic/unique environment/residual value for the individual is `r round(ESDU,2)` residual SD units, or `r round(EPSDU,2)` phenotypic SD units, so the phenotypic liability is `r round(PSDU,2)`, (i.e.,`r round(APSDU,2)` + `r round(EPSDU,2)`) phenotypic SD units.  
+This individual has disease status `r disease_status`. When the code is re-run, these numbers will change.  
+
+# Normal distribution theory to link different PRS prediction statistics; needed for Figure 4
+
+Using normal distribution theory, assuming a ~N(0,1) distribution of liability in the population and assuming a known lifetime risk of disease of $K$ and a known variance explained by the PRS of $r^2$, we calculate various expected PRS statistics. This code is used to generate Figure 4 below.
+With real data, the relationship between the different evaluation statistics should be chekced empirically.  
+The code is annotated to explain how each variable is derived.
+
+First, we assume that the phenotypic liability of disease (P) has variance  1, and the PRS has variance $r^2$. The covariance of  P with PRS is $r^2$. Amongst cases (i.e. P > T, where T is the liability threshold that bisects the normal distribution for lifetime probability of disease, K), the variance in PRS is $r^2$(1-$k$ * $r^2$), where k is the variance reduction factor $k= i*(i-T)$, where i is the mean phenotypic liability of cases which is z/K, where z is the height of the normal curve at threshold T. The variance in PRS in controls is calculated similarly with variance reduction factor of $k = v*(1-v)$, where $v= -i*K/(1-K)$.
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8}
+risk_stat<-function(K,r2,x){
+# K = Probability of disease (lifetime risk of disease) 
+# r2 = variance explained by PRS (or any predictor)  
+# x = must be between 0 and 1;  proportion of population ranked on PRS, 
+# e.g. x=0.10 means top decile
+
+T0 = qnorm(1-K) #threshold for K
+z = dnorm(T0)   #height of normal distrubution at threshold
+i = z/K    # mean phenotypic liability of cases
+v = -i*K/(1-K)      #mean phenotypic liability of controls
+vcase=r2*(1-r2*i*(i-T0)) # variance in PRS in cases
+vcont=r2*(1-r2*v*(v-T0))  # variance in PRS in controls
+
+# Consider top x*100% of the population based on PRS`ranking
+tx=qnorm(1-x,0,sqrt(r2))
+pcase_popx=1-pnorm(tx,i*r2,sqrt(vcase)) # prop of cases captured when taking the top x*100% of the population ranked on PRS
+pcont_popx=1-pnorm(tx,v*r2,sqrt(vcont)) # prop of controls captured when taking the top x*100% of the population ranked on PRS
+
+oddscase=(pcase_popx/(1-pcase_popx))/(pcont_popx/(1-pcont_popx)) #odds of being a case in the top x*100% of pop ranked ib PRS
+oddscase2=pcase_popx/pcont_popx 
+prop_casex=pcase_popx*K/x  # proportion of the top x*100% ranked on PRS that are cases
+
+#odds relative to median
+sL=0.45
+tL=qnorm(sL,i*r2,sqrt(vcase))
+ppop_caseL=pnorm(tL,0,sqrt(r2)) # prop of pop screened to capture 45% of cases
+sH=0.55
+tH=qnorm(sH,i*r2,sqrt(vcase))
+ppop_caseH=pnorm(tH,0,sqrt(r2)) # prop of pop screened to capture 55% of cases
+
+# calculate AUC for variance explained on liability scaled
+# probability of a case being higher ranked than a control
+auc=pnorm((i-v)*r2/(sqrt(vcase+vcont)))
+
+return(list(auc=auc,
+            pcase_popx=pcase_popx,
+            oddscase=oddscase,
+            oddscase2=oddscase2,
+            pcase_popx=pcase_popx,
+            pcont_popx=pcont_popx,
+            prop_casex=prop_casex))
+}
+```
+
+
+## Proportion of cases captured when ranking on PRS
+If prevention is targetted at the top x proportion of the population (x-axis), what proportion of cases will be captured (y-axis) is this targetted proportion.  
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 4, fig.height=4}
+#opar<-par(mfrow=c(2,2))
+K=0.01
+r2=0.10
+
+xx=c(0,1)
+xlabel="Proportion of population screened, ranked on PRS"
+ylabel="Proportion of the cases in the screened set" 
+main_label=paste("lifetime disease risk=",K)
+plot(xx,xx,ty="n",xlab=xlabel,ylab=" ",main=" ")
+mtext(ylabel,side=2,line=2,col=1)
+mtext(main_label,side=3,line=0,col=1)
+
+curve(risk_stat(K,0.10,x)$pcase_popx,from=0.01,to=1,col=1,lty=1,lwd=4,add=TRUE)
+curve(risk_stat(K,0.20,x)$pcase_popx,from=0.01,to=1,col=2,lty=1,lwd=4,add=TRUE)
+curve(risk_stat(K,0.5,x)$pcase_popx,from=0.01,to=1,col=3,lty=1,lwd=4,add=TRUE)
+leg1=paste("r2=0.1;auc =",format(round(risk_stat(K,0.10,0.5)$auc,2),nsmall=2))
+leg2=paste("r2=0.2;auc =",format(round(risk_stat(K,0.20,0.5)$auc,2),nsmall=2))
+leg3=paste("r2=0.5;auc =",format(round(risk_stat(K,0.50,0.5)$auc,2),nsmall=2))
+legend(0.2,0.35,legend=c(leg1,leg2,leg3),col=c(1,2,3),
+       lty=c(1,1,1),lwd=4)
+```
+  
+## Relationship between increasing proportion of variance explained by PRS and odds of being a case amongst those in the top x% of subjects based on PRS ranking
+
+Given the variance explained by PRS on the liability scale (x-axis), what is the odds of being a case (y-axis) in the top percentile groups (lines)?  
+  
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 4, fig.height=4}
+xlabel="population variance explained by PRS (r2)"
+ylabel="Odds of being a case" 
+main_label=paste("lifetime disease risk=",K)
+plot(c(0,0.25),c(1,20),ty="n",xlab="",ylab=" ",main="")
+mtext(ylabel,side=2,line=2,col=1)
+mtext(xlabel,side=1,line=2,col=1)
+mtext(main_label,side=3,line=0,col=1)
+
+curve(risk_stat(K,x,0.01)$oddscase,from=0.01,to=0.25,col=1,lty=1,lwd=4,add=TRUE)
+curve(risk_stat(K,x,0.05)$oddscase,from=0.01,to=0.25,col=2,lty=1,lwd=4,add=TRUE)
+curve(risk_stat(K,x,0.10)$oddscase,from=0.01,to=0.25,col=3,lty=1,lwd=4,add=TRUE)
+curve(risk_stat(K,x,0.20)$oddscase,from=0.01,to=0.25,col=4,lty=1,lwd=4,add=TRUE)
+
+leg1=paste("top 1%")
+leg2=paste("top 5%")
+leg3=paste("top 10%")
+leg4=paste("top 20%")
+legend(0,20,legend=c(leg1,leg2,leg3,leg4),col=c(1,2,3,4),
+       lty=c(1,1,1,1),lwd=4,cex=0.8)
+```
+
+
+
+## Decile plot
+Odds ratio of cases status in deciles compared to first decile . 
+  
+  
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 4, fig.height=4}
+nt=10
+d_case=c(rep(0,nt)); d_cont=c(rep(0,nt))
+dec_case=c(rep(0,nt));dec_cont=c(rep(0,nt))
+K=0.01
+r2=0.10
+for(i in 1:nt){
+  p=(1-(i/nt))
+  if(i==10){p=0.00000000001}
+Q=risk_stat(K,r2,p)
+d_case[i]=Q$pcase_popx
+d_cont[i]=Q$pcont_popx
+}
+for (i in nt:2){
+  dec_case[i]=d_case[i-1]-d_case[i]
+  dec_cont[i]=d_cont[i-1]-d_cont[i]
+}
+dec_case[1]=1-d_case[1]
+dec_cont[1]=1-d_cont[1]
+odds=dec_case/dec_cont
+oddsR=odds/odds[1]
+main_label=paste("lifetime disease risk=",K, "r2=",r2)
+plot(c(1:nt),oddsR,col=1,pch=17,ylim=c(0,30),xlab="decile",ylab="odds",main=main_label)
+
+axis(side=1,at=c(1:nt),  labels=c(1:nt))
+lines(c(0,(nt+1)),c(1,1),lwd=1,lty=2)
+```
+
+
+Values for the 10 deciles compared to first decile:  
+`r round(oddsR,2)`
+
+
+## Odds table and AUC  
+The top set of numbers  are odds of being a case in  the top proportion of people based on PRS ranke (defined by the  cut proportion).  AUC is the  area under  the receiver  operator  characteristic curve and can be interpreted as the probability that  a case ranks higher than a control. 
+For the code, go to the Rmd file.
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 4, fig.height=4}
+Ks=c(0.01,0.15)
+cuts=c(0.01,0.05,0.10,0.20,0.50)
+r2s=c(0.10,0.20)
+out=matrix(c(rep(0,6*4)),nrow=6,ncol=4)
+for (i in 1:5){
+  for(k in 1:2){
+    for (jj in 1:2){
+      j=(k-1)*2+jj
+      out[i,j]=risk_stat(Ks[k],r2s[jj],cuts[i])$oddscase2
+      if(i==1){out[6,j]=risk_stat(Ks[k],r2s[jj],cuts[i])$auc;
+      }
+    }
+  }
+}
+
+row.names(out)=c("cut0.01", "cut0.05","cut0.10","cut0.20","cut0.50","AUC")
+colnames(out)=c("K=0.01,r2=0.1", "K=0.01,r2=0.2","K=0.10,r2=0.1","K=0.10,r2=0.2")
+format(round(out,2),nsmall=2)
+```
+
+# Code for Figure 1
+
+## Generate random genotype files
+This code users a random number generator so the Figures can change with different runs of the code.
+Data files for cases and controls are generated. If the files are present in your folder (i.e. you have run the code before) they will be used to generate the Figures. Delete (or rename) those files to generate new versions of the Figure.  
+```{r,warning=FALSE}
+# this is to decide how many loci you like. 
+# It need to be a number that can be square rooted.
+n.allele = 900
+
+p = 0.1  #allele frequency
+h2 = 0.7  #heritability
+K = 0.01  #lifetime risk
+```
+
+
+
+```{r, eval = T,warning=FALSE}
+## this is the function to generate a panel.
+visua.profile = function(status, n.allele,p,h2,K) {
+#n.allele n number of loci 
+  # --> must be a perfect square number like 4, 16, 49, 100...
+#p allele freq per locus
+#h2 proprotion of variance that is genetic
+#K lifetime risk of disease
+  
+n=n.allele     #n number of loci 
+m=n.allele     #total number of alleles
+
+Ncas=5   #Number of cases 
+caus=c(rep(0,m)) # assign causal loci
+while(sum(caus)!=n){caus=rbinom(m,1,(n/m))}
+d = status
+
+# A function that return a set of alleles for all the loci. 
+# d is 1 for case and 0 for control
+get_riskalleles=function(n,p,h2,K,d,m,caus){
+  #generating cases/controls
+  VG=2*n*p*(1-p)
+  VP=VG/h2
+  VE=VP-VG
+  tr=-qnorm(K)
+  #case
+  repeat{
+  if(d==1){
+    D=0
+    while(D==0){
+      allele = rbinom(m,2,p)
+      S=sum(allele[caus==1])
+      E=rnorm(1,0,sqrt(VE))
+      P=(S+E-2*n*p)/sqrt(VP)
+      if(P>tr){D=1}
+    }}else{
+      #control
+      D=1
+      while(D==1){
+        allele = rbinom(m,2,p)
+        S=sum(allele[caus==1])
+        E=rnorm(1,0,sqrt(VE))
+        P=(S+E-2*n*p)/sqrt(VP)
+        if(P<tr){D=0} 
+      }}
+  score = sum(allele)
+  return(allele)
+  if(P > -3 & P < 3) break
+  }
+  }
+
+
+
+repeat{
+# Run the function to get alleles
+allele_vector=get_riskalleles(n,p,h2,K,d,m,caus)
+score = sum(allele_vector)
+
+for (i in 2:Ncas){
+  new_vector = get_riskalleles(n,p,h2,K,d,m,caus)
+  allele_vector=c(allele_vector, new_vector)
+  score = c(score, sum(new_vector))
+}
+
+
+#Create the complete data frame
+data.case = data.frame(
+  patient = rep( paste0("count RV = ", score), each=m ) ,
+  sick = c(rep("case",(Ncas*m))),
+  snp = rep( paste0("snp",seq(1,m)) , (Ncas)),
+  allele = allele_vector,
+  caus=caus,
+  PRS = rep(score, each = m)
+)
+
+data.case$patient = as.factor(data.case$patient)
+ 
+#To plot each allele I need to give a X and a Y coordinate to each allele
+mydim=sqrt(m)
+data.case = data.case %>%
+  mutate( X = rep ( rep( seq(1, mydim), each=mydim), (Ncas))) %>%
+  mutate( Y = rep ( rep( seq(1, mydim), mydim), (Ncas)))
+
+if ( nlevels(data.case$patient) == 5 )  break
+
+}
+
+
+return(data.case)
+}
+```
+
+
+```{r, eval = T, warning=FALSE}
+## cases profiles
+status = 1
+file.name.1 = paste0("random_generated_with_", n.allele, 
+                           "_alleles_p_h2_K_",  p,  "_", h2,"_", 
+                           K, "_in_status",  status,  ".txt")
+
+ 
+if(file.exists(file.name.1) == F) {
+  write.table(visua.profile(status, n.allele,p,h2,K),  file =file.name.1, sep ="\t",  row.names = F  )
+}
+
+
+## controls profiles
+status = 0
+file.name.0 = paste0("random_generated_with_", n.allele, 
+                           "_alleles_p_h2_K_", p, "_", h2,  "_",
+                           K, "_in_status",  status, ".txt")  
+
+if(file.exists(file.name.0) == F) {
+  write.table(visua.profile(status, n.allele,p,h2,K),   file = file.name.0,  sep ="\t", row.names = F  )
+}
+ 
+```
+
+
+
+## Plot the genomic profiles 
+
+
+```{r, fig.width = 8, fig.height = 4.5, warning=FALSE}
+visua.plot = function(status, n.allele, data.case ){
+  mydim=sqrt(n.allele)
+  data.case$allele = as.factor(data.case$allele)
+  data.case$patient = factor(data.case$patient, levels = unique(data.case$patient))
+  
+  anno1 = data.frame(x1 = -2*mydim/30 +1,
+                  x2 = 1 + 5*mydim/40,
+                  x3 = mydim - 5*mydim/40,
+                  x4 = mydim + 2*mydim/30,
+                  y1 = mydim + 2*mydim/30,
+                  y2 = 0,
+                  y3 = -8*mydim/30,
+                  patient = factor(data.case$patient, 
+                                   levels = paste0("count RV = ", unique(data.case$PRS)))) 
+
+  ann_text = data.frame(patient =c( paste0("count RV = ", unique(data.case$PRS))) ,
+                     Y =  -3*mydim/30, X = mydim/2+0.5,
+                     label.col = c("a", "b", "c", "d", "e", "f", 
+                                   "g", "h", "i", "j")[(6-5*status):(10-5*status)] 
+                     )
+
+figure.cases1 = ggplot(data.case,aes(x=X,y=Y,color=allele))+
+  geom_point(size = 0.4*(30/mydim)^2) +    
+  facet_grid(~patient, 
+             scales="free", 
+             space="free", 
+             switch="y",  
+             labeller = label_wrap_gen()) +
+  scale_y_reverse() +
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        strip.text=element_blank()) +
+  scale_colour_manual(values=c("grey", "blue","red")) +
+  geom_segment(data = anno1, aes(x = x1, xend = x1, 
+                                y = y1, yend = y2),
+               colour = "gray38") +
+  geom_segment(data = anno1, aes(x = x4, xend = x4, 
+                                y = y1, yend = y2),
+               colour = "gray38") +
+  geom_segment(data = anno1, aes(x = x1, xend = x4, 
+                                y = y1, yend = y1),
+               colour = "gray38")+
+  geom_segment(data = anno1, aes(x = x2, xend = x3, 
+                                  y = y3, yend = y3),
+                 colour = "gray38") +
+  geom_segment(data = anno1, aes(x = x1, xend = x2, 
+                                  y = y2, yend = y3),
+                 colour = "gray38")+
+  geom_segment(data = anno1, aes(x = x3, xend = x4, 
+                                  y = y3, yend = y2),
+                 colour = "gray38") 
+ 
+figure.cases = figure.cases1 + 
+  geom_text(data = ann_text, 
+            label = ann_text$patient , 
+            y = 3.5*mydim/30, 
+            colour = "black", 
+            size = 4) 
+  }
+
+
+
+## input the data
+data.in.cases = read.table(paste0("random_generated_with_", n.allele, "_alleles_p_h2_K_", 
+                                  p, "_", h2, "_", K, "_in_status1.txt"), 
+                           header = T)
+
+data.in.controls = read.table(paste0("random_generated_with_", n.allele,  
+                                     "_alleles_p_h2_K_", p,  "_", h2, "_", K,
+                                     "_in_status0.txt"), 
+                              header = T)
+
+## get the labels
+mydim=sqrt(n.allele)
+x.of.10 = unique(rbind(data.in.cases, data.in.controls)[,c("patient", "PRS")])
+x.of.10$label.col = c("a", "b", "c", "d", "e", "f", "g", "h", "i", "j")  
+x.of.10$standardized.prs = round((x.of.10$PRS-2*n.allele*p)/sqrt(2*n.allele*p*(1-p)) , 2)
+x.of.10$allele = NA
+
+
+## combine the two panels of case and control
+vis.fig1 = ggarrange( visua.plot(1, n.allele, data.in.cases) +  
+                        ggtitle("Affected over lifetime"), 
+                      visua.plot(0, n.allele, data.in.controls)  +  
+                        ggtitle("Not affected over lifetime") , 
+                      ncol = 1, nrow = 2)
+
+
+ggsave(vis.fig1, 
+       file = paste0("Figure1_", n.allele, "_alleles_p_h2_K",
+                     p,"_",h2,"_",K,".pdf"), 
+       width = 8, 
+       height =4)
+vis.fig1
+```
+
+
+## Histogram with the 10 samples marked
+In this version of the Figure we tried to show where the 10 individuals were placed on a genetic liability distribution, and to illustrate within family variance.  
+
+```{r, fig.width=10, fig.height = 4, eval = T, warning=FALSE}
+xl=-3
+xh=3
+
+shade_curve <- function(MyDF, zstart, zend, fill = "red", alpha = .5){
+  geom_area(data = subset(MyDF, x >= mean.1 + zstart*sd.1
+                          & x < mean.1 + zend*sd.1),
+            aes(y=y), fill = fill, color = NA, alpha = alpha)
+}
+
+mean.1 <-0
+sd.1 <- 1
+zstart <- -3
+zend <- 3
+x = seq(from = - 3, to = 3, by = .01)
+
+
+norm.plot <- ggplot(data = data.frame(x = c(xl,xh)), aes(x)) +
+  stat_function(fun = dnorm,  args = list(mean = 0, sd = 1)) + 
+  ylab("") + 
+  xlab("genetic liability") + 
+  ylim(0,0.5) + 
+  theme(axis.text.x=element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank()) +
+  shade_curve(MyDF = data.frame(x = x, 
+                                y = dnorm(x, mean = 0, sd = 1)), 
+                                zstart = -3, 
+                                zend = 3, 
+                                fill = "white", 
+                                alpha = .7) +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[1,]$standardized.prs,
+                   xend = x.of.10[1,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[1,]$standardized.prs, sd = 1, mean = 0)+0.05),
+               color = "red") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[2,]$standardized.prs,
+                   xend = x.of.10[2,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[2,]$standardized.prs, sd = 1, mean = 0)+0.05),
+               color = "red") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[3,]$standardized.prs,
+                   xend = x.of.10[3,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[3,]$standardized.prs, sd = 1, mean = 0)+0.05),
+               color = "red") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[4,]$standardized.prs,
+                   xend = x.of.10[4,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[4,]$standardized.prs, sd = 1, mean = 0)+0.05),
+               color = "red") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[5,]$standardized.prs,
+                   xend = x.of.10[5,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[5,]$standardized.prs, sd = 1, mean = 0)+0.05),
+               color = "red") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[6,]$standardized.prs,
+                   xend = x.of.10[6,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[6,]$standardized.prs, sd = 1, mean = 0)),
+               color = "blue") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[7,]$standardized.prs,
+                   xend = x.of.10[7,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[7,]$standardized.prs, sd = 1, mean = 0)),
+               color = "blue") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[8,]$standardized.prs,
+                   xend = x.of.10[8,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[8,]$standardized.prs, sd = 1, mean = 0)),
+               color = "blue") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[9,]$standardized.prs,
+                   xend = x.of.10[9,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[9,]$standardized.prs, sd = 1, mean = 0)),
+               color = "blue") +
+  geom_segment(data = data.frame(x = c(xl,xh)), 
+               aes(x = x.of.10[10,]$standardized.prs,
+                   xend = x.of.10[10,]$standardized.prs, 
+                   y = 0, 
+                   yend = dnorm(x = x.of.10[10,]$standardized.prs, sd = 1, mean = 0)),
+               color = "blue") +
+  geom_text(data = x.of.10[x.of.10$label.col %in% c("h", "i"),], 
+            label = x.of.10[x.of.10$label.col %in% c("h", "i"),]$label.col, 
+            x = x.of.10[x.of.10$label.col %in% c("h", "i"),]$standardized.prs, 
+            y = c((dnorm(x = x.of.10[x.of.10$label.col =="h",]$standardized.prs, 
+                         sd = 1, mean = 0)+ 0.05),
+                  (dnorm(x = x.of.10[x.of.10$label.col =="i",]$standardized.prs, 
+                         sd = 1, mean = 0)+ 0.05)), 
+            size = 5)  + 
+  ggtitle("in population") 
+
+
+## plot of h and i 
+mean.h.i = mean(x.of.10[x.of.10$label.col%in%c("h", "i"),]$standardized.prs)
+
+parent.norm = ggplot(data = data.frame(x = c(xl,xh)), aes(x)) +
+  stat_function(fun = dnorm,  
+                args = list(mean = mean.h.i,
+                            sd = sqrt(0.5))) + 
+  ylab("") + 
+  xlab("genetic liability") + 
+  ylim(0,0.8) + 
+  theme(axis.text.x=element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())+
+   shade_curve(MyDF = data.frame(x = x, y = dnorm(x, mean = mean.h.i, sd = sqrt(0.5))) , 
+               zstart = -3, 
+               zend = 1.5, 
+               fill = "white", 
+               alpha = .7) +
+   shade_curve(MyDF = data.frame(x = x,  y = dnorm(x, mean = mean.h.i, sd = sqrt(0.5))) , 
+               zstart = 1.5, 
+               zend = 3, 
+               fill = "pink", 
+               alpha = .7) +
+geom_segment(data = data.frame(x = c(xl, xh)), aes(x = x.of.10[8,]$standardized.prs,
+                                                   xend = x.of.10[8,]$standardized.prs, 
+                                                   y = 0.3, 
+                                                   yend = 0.07 + 
+                                                  dnorm(x = x.of.10[8,]$standardized.prs, 
+                                                  sd = sqrt(0.5), 
+                                                   mean =mean.h.i )), 
+             linetype= "dotted") +
+geom_segment(data = data.frame(x = c(xl,xh)), aes(x = x.of.10[9,]$standardized.prs,
+                                                  xend = x.of.10[9,]$standardized.prs, 
+                                                  y = 0.3, 
+                                                  yend = 0.07 + 
+                                                  dnorm(x = x.of.10[9,]$standardized.prs, 
+                                                          sd = sqrt(0.5), 
+                                                          mean = mean.h.i)), 
+               linetype= "dotted") +
+geom_text(data = x.of.10[x.of.10$label.col %in% c("h", "i"),], 
+            label = x.of.10[x.of.10$label.col %in% c("h", "i"),]$label.col, 
+            x = c(x.of.10[x.of.10$label.col=="h",]$standardized.prs ,
+                  x.of.10[x.of.10$label.col=="i",]$standardized.prs ), 
+            y = c(dnorm(x = x.of.10[x.of.10$label.col =="h",]$standardized.prs, 
+                        sd = sqrt(0.5), 
+                        mean = mean.h.i)+ 0.12,
+                  dnorm(x = x.of.10[x.of.10$label.col =="i",]$standardized.prs, 
+                        sd = sqrt(0.5), 
+                        mean = mean.h.i)+ 0.12), 
+            size = 5)  + 
+ggtitle("children of h and i")
+
+
+## make labeled vis.fig1
+
+ann_text.cases = data.frame(patient =c( paste0("count RV = ", unique(data.in.cases$PRS))) ,
+                     Y =  -3*mydim/30, X = mydim/2+0.5,
+                     label.col = c("a", "b", "c", "d", "e", "f", 
+                                   "g", "h", "i", "j")[1:5] 
+                     )
+ann_text.controls = data.frame(patient =c( paste0("count RV = ", unique(data.in.controls$PRS))) ,
+                     Y =  -3*mydim/30, X = mydim/2+0.5,
+                     label.col = c("a", "b", "c", "d", "e", "f", 
+                                   "g", "h", "i", "j")[6:10] 
+                     )
+
+vis.fig1 = ggarrange( visua.plot(1, n.allele, data.in.cases) +  
+                        ggtitle("Affected over lifetime") + 
+                        geom_text(data =ann_text.cases, 
+                                  label = ann_text.cases$label.col, 
+                                  x = 0, 
+                                  y = 6*mydim/30, 
+                                  colour = c("blue","red")[2], 
+                                  size = 6), 
+                      visua.plot(0, n.allele, data.in.controls)  +  
+                        ggtitle("Not affected over lifetime") + 
+                        geom_text(data =ann_text.controls, 
+                                  label = ann_text.controls$label.col, 
+                                  x = 0, 
+                                  y = 6*mydim/30, 
+                                  colour = c("blue","red")[1], 
+                                  size = 6), 
+                      ncol = 1, nrow = 2)
+
+
+
+## combine             
+norm.both = ggarrange(norm.plot, parent.norm, ncol = 1)  
+final.fig1 = ggarrange(vis.fig1, norm.both, widths = c(7,2))
+final.fig1
+
+
+## save it.
+ggsave(final.fig1, 
+       file = paste0("Figure1_", n.allele, "_alleles_p_h2_K",
+                     p,"_",h2,"_",K,"_with_dnorm.pdf"), 
+       width = 10, 
+       height =4)
+
+```
+
+
+# Code for Figure 4
+
+## Calculate the risk fold and AUC
+We consider a disease for which we know lifetime risk and variance explained by  PRS  currently and in  the future. From this information we  can  calculate a number of statistics, which follow from normal distribution theory. These calculations hold for polygenic disease. The assumptions  break down when there are common variants of very large effect (as these impact the uniomodality assumption), more complex modelling is needed in those cases. 
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8}
+## SCZ
+KSCZ=0.01  #lifetime risk schziophrenia
+r2SCZ=0.11 #r2 explained by PRS currently for SCZ approx
+r2SCZF=0.25 #r2 explained by PRS future for SCZ approx
+nameSCZ="schizophrenia"
+
+SCZ10=risk_stat(KSCZ,r2SCZ,0.10)$prop_casex # SCZ now top 10%
+SCZ1=risk_stat(KSCZ,r2SCZ,0.01)$prop_casex # SCZ now top 1%
+SCZ10F=risk_stat(KSCZ,r2SCZF,0.10)$prop_casex # SCZ future top 10%
+SCZ1F= risk_stat(KSCZ,r2SCZF,0.01)$prop_casex # SCZ future top 1%
+
+SCZ.risk.table = data.frame(matrix(c(
+        r2SCZ,
+        r2SCZF,
+        SCZ10,
+        SCZ10F,
+        SCZ1,
+        SCZ1F,
+        risk_stat(KSCZ,r2SCZ,0.10)$auc ,
+        risk_stat(KSCZ,r2SCZF,0.10)$auc,
+        risk_stat(KSCZ,r2SCZ,0.10)$prop_casex/KSCZ , # SCZ now
+        risk_stat(KSCZ,r2SCZ,0.01)$prop_casex/KSCZ , # SCZ now
+        risk_stat(KSCZ,r2SCZF,0.10)$prop_casex/KSCZ, # SCZ future
+        risk_stat(KSCZ,r2SCZF,0.01)$prop_casex/KSCZ # SCZ future
+      ), 
+  ncol = 2, byrow = T))
+row.names(SCZ.risk.table) = c("r2- var explained by PRS", 
+                              "prop of cases in top 10% PRS", 
+                              "prop of cases in top 1%" , 
+                              "AUC", 
+                              "Risk fold in top 10% PRS", 
+                              "Risk fold in top 1% PRS")
+colnames(SCZ.risk.table) = c("current", "future")
+```
+
+With lifetime risk of `r nameSCZ` of `r KSCZ*100`% and variance explained by PRS currently of `r r2SCZ*100`% and variance explained by PRS in future of `r r2SCZF*100`% 
+```{r}
+round(SCZ.risk.table, 2)
+```
+
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.height=8}
+
+## MD
+nameMD="major depression"
+KMD=0.15  #lifetime major depression
+r2MD=0.04 #r2 explained by PRS currently for MD approx
+r2MDF=0.12 #r2 explained by PRS future for MD approx
+
+MD10=risk_stat(KMD,r2MD,0.10)$prop_casex # MD now top 10%
+MD1=risk_stat(KMD,r2MD,0.01)$prop_casex # MD now top 1%
+MD10F=risk_stat(KMD,r2MDF,0.10)$prop_casex # MD future top 10%
+MD1F=risk_stat(KMD,r2MDF,0.01)$prop_casex # MD future top 1%
+
+MD.risk.table = data.frame(matrix(c(
+    r2MD,
+    r2MDF,
+    MD10,
+    MD10F,
+    MD1,
+    MD1F,
+    risk_stat(KMD,r2MD,0.10)$auc ,
+    risk_stat(KMD,r2MDF,0.10)$auc,
+    risk_stat(KMD,r2MD,0.10)$prop_casex/KMD , # MD now
+    risk_stat(KMD,r2MD,0.01)$prop_casex/KMD , # MD now
+    risk_stat(KMD,r2MDF,0.10)$prop_casex/KMD, # MD future
+    risk_stat(KMD,r2MDF,0.01)$prop_casex/KMD # MD future
+  ), ncol = 2, byrow = T))
+row.names(MD.risk.table) = c("R2", 
+                             "prop of cases in top 10% PRS", 
+                             "prop of cases in top 1%" , 
+                             "AUC", 
+                             "Risk fold in top 10% PRS", 
+                             "Risk fold in top 1% PRS")
+colnames(MD.risk.table) = c("current", "future")
+```
+
+With lifetime risk of `r nameMD` of `r KMD*100`% and "variance explained by PRS currently of `r r2MD*100`% and variance explained by PRS in future of `r r2MDF*100`% 
+```{r, echo= FALSE}
+round(MD.risk.table, 2)
+```
+
+
+## Plotting subroutine 
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 15, fig.height = 12}
+#setwd("~/Documents/Naomi/Collaborators/F-K/GrahamMurray/PRS/Figures")
+
+## define the plot function
+incidence.plot = function(percentage){
+## generage a table 
+n.case = 100*percentage
+n.control = 100 - n.case
+sample = data.frame(matrix(NA, nrow = 100, ncol =3))
+colnames(sample) = c("row", "column", "color")
+sample$row = rep(c(1:10), 10)
+sample$column = sort(rep(c(1:10), 10))
+sample$color = as.factor(c(rep(1, n.case), rep(2, n.control)))
+## generate the plot
+sample$labs = fontawesome('fa-male')
+example.risk.plot = ggplot(sample,aes(x=row,y=column,color=color))+
+  geom_text(aes(label=labs),
+            family='fontawesome-webfont', 
+            size=8, 
+            colors = c("red","blue"))+
+  scale_y_continuous(labels = comma)+
+  scale_y_reverse() +
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  scale_colour_manual(values=c("blue", "red"))
+#print (example.risk.plot)
+}
+
+```
+
+
+## One disease only
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 15, fig.height = 12, echo= FALSE}
+
+label.size = 7
+
+
+## prepare the labels
+ann_text1 = data.frame(row = 7.5,column = 8.5,
+                      notes = "3.3 fold")
+
+#labels
+lab2=paste(round(risk_stat(KSCZ,r2SCZ,0.10)$prop_casex/KSCZ,1),"fold")
+lab3=paste(round(risk_stat(KSCZ,r2SCZ,0.01)$prop_casex/KSCZ,1),"fold")
+lab4=paste(round(risk_stat(KSCZ,r2SCZF,0.10)$prop_casex/KSCZ,1),"fold")
+lab5=paste(round(risk_stat(KSCZ,r2SCZF,0.01)$prop_casex/KSCZ,0),"fold")
+
+## make the 5 plots with different liability
+plot1  = incidence.plot(round(KSCZ,2))
+plot2  = incidence.plot(round(SCZ10,2))  + 
+  geom_label(data = ann_text1, label = lab2, color = "black", size = label.size +1 )
+plot3  = incidence.plot(round(SCZ1,2))   + 
+  geom_label(data = ann_text1, label = lab3, color = "black", size = label.size +1 )
+plot4  = incidence.plot(round(SCZ10F,2)) + 
+  geom_label(data = ann_text1, label = lab4, color = "black", size = label.size +1 )
+plot5  = incidence.plot(round(SCZ1F,2))  +  
+  geom_label(data = ann_text1, label = lab5, color = "black", size = label.size +1 )
+
+
+## 1 ####
+my_text11 = "Approximately\nrepresentative of"
+my_text12 = paste0(nameSCZ, '\nlife-time risk ', KSCZ*100 ,"%")
+
+
+note1 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,10)) +
+  annotate('text', x = 5, y = 5.5, label = my_text11, size = label.size)+
+  annotate('text', x = 5, y = 3.5, label = my_text12, size = label.size, fontface="bold")+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  
+## 2 ####
+
+my_text21 = "Approximately\nrepresentative of"
+my_text22 =  paste0(nameMD, "\nlife-time risk ", KMD*100 ,"%")
+
+
+
+note2 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,10)) +
+  annotate('text', x = 5, y = 5.5, label = my_text21, size = label.size)+
+  annotate('text', x = 5, y = 3.5, label = my_text22, size = label.size, fontface="bold")+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  
+
+## 3-5 #############################################
+text3 = data.frame(row =1,column = 1, notes = "100 people\n random from\n population" )
+note3 =  ggplot(data = text3, aes(x =row, y = column)) + 
+  geom_text(aes(label=notes), size = label.size) + 
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) + 
+  ylim(c(0,3))
+
+text4 = data.frame(row =1,column = 1, notes = "100 people\n from top 10%\n of PRS" )
+note4 =  ggplot(data = text4, aes(x =row, y = column)) + 
+  geom_text(aes(label=notes), size = label.size) + 
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + 
+  ylim(c(0,3))
+
+
+text5 = data.frame(row =1,column = 1, notes = "100 people\n from top 1%\n of PRS" )
+note5 =  ggplot(data = text5, aes(x =row, y = column)) + 
+  geom_text(aes(label=notes), size = label.size) + 
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + 
+  ylim(c(0,3))
+
+
+
+## 6 ####
+my_text61 = expression(bold("Current:")) 
+my_text62 = paste0("\nPRS explain ~", 
+                   r2SCZ*100 ,
+                   "% of liability, AUC: ", 
+                   format(round(risk_stat(KSCZ,r2SCZ,0.10)$auc,2),nsmall=2))
+
+
+note6 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,2)) +
+  annotate('text', x = 5, y = 1.4, label = my_text61, size = label.size)+
+  annotate('text', x = 5, y = 0.9, label = my_text62, size = label.size - 1)+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + ylim(c(0,2))
+
+## 7 ####
+my_text71 = expression(bold("Future:")) 
+my_text72 = paste0("\nPRS explain ~", 
+                   r2SCZF*100, 
+                   "% of liability, AUC: ", 
+                   format(round(risk_stat(KSCZ,r2SCZF,0.10)$auc,2),nsmall=2) )
+
+note7 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,2)) +
+  annotate('text', x = 5, y = 1.4, label = my_text71, size = label.size)+
+  annotate('text', x = 5, y = 0.9, label = my_text72, size = label.size-1)+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + 
+  ylim(c(0,2))
+
+```
+
+
+
+```{r,  fig.width = 15, fig.height = 8, warning=FALSE}
+
+comb.plot.d1 = (plot_spacer() | note3 | note4 | note5 | note4 | note5 ) /
+               (plot_spacer() | note6 | note7 ) / 
+               (note1 | plot1 | plot2 | plot3 | plot4 | plot5) + 
+               plot_layout(heights = c(3.8,2,10))
+ggsave(comb.plot.d1, width = 15, height = 8, filename = "Figure4_1disease.png")
+ggsave(comb.plot.d1, width = 15, height = 8, filename = "Figure4_1disease.pdf")
+
+```
+
+![](Figure4_1disease.png)
+
+
+
+## Two disease
+This is the Figure primer paper, set up with the parameter values for the accompanying paper also published in JAMA Psychiatry "Polygenic risk scores - could they be useful in psychiatry?' Murray et al (2020), Figure 3.  
+
+```{r, message=FALSE, warning=FALSE, eval = T, fig.width = 15, fig.height = 12, echo= FALSE}
+
+#labels
+lab7=paste(round(risk_stat(KMD,r2MD,0.10)$prop_casex/KMD,1),"fold")
+lab8=paste(round(risk_stat(KMD,r2MD,0.01)$prop_casex/KMD,1),"fold")
+lab9=paste(round(risk_stat(KMD,r2MDF,0.10)$prop_casex/KMD,1),"fold")
+lab10=paste(round(risk_stat(KMD,r2MDF,0.01)$prop_casex/KMD,1),"fold")
+
+#plot
+plot6  = incidence.plot(round(KMD,2))
+plot7  = incidence.plot(round(MD10,2))   + 
+  geom_label(data = ann_text1, label = lab7, color = "black", size = label.size +1 )
+plot8  = incidence.plot(round(MD1,2))    + 
+  geom_label(data = ann_text1, label = lab8, color = "black", size = label.size +1 )
+plot9  = incidence.plot(round(MD10F,2))  + 
+  geom_label(data = ann_text1, label = lab9, color = "black", size = label.size +1 )
+plot10 = incidence.plot(round(MD1F,2))   + 
+  geom_label(data = ann_text1, label = lab10, color = "black", size = label.size +1 )
+
+
+## 8 #######
+my_text81 = expression(bold("Current:")) 
+my_text82 = paste0("\nPRS explain ~", 
+                   r2MD*100, 
+                   "% of liability, AUC: ", 
+                   format(round(risk_stat(KMD,r2MD,0.10)$auc,2),nsmall=2))
+
+
+note8 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,2)) +
+  annotate('text', x = 5, y = 1.4, label = my_text81, size = label.size )+
+  annotate('text', x = 5, y = 0.9, label = my_text82, size = label.size - 1)+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + ylim(c(0,2))
+
+## 9 ####
+my_text91 = expression(bold("Future:")) 
+my_text92 = paste0("\nPRS explain ~",
+                   r2MDF*100,
+                   "% of liability, AUC: ", 
+                   format(round(risk_stat(KMD,r2MDF,0.10)$auc,2),nsmall=2))
+                
+note9 =  ggplot() + 
+  lims(x = c(0,10), y = c(0,2)) +
+  annotate('text', x = 5, y = 1.4, label = my_text91, size = label.size )+
+  annotate('text', x = 5, y = 0.9, label = my_text92, size = label.size -1)+
+  theme_bw()  + 
+  theme(panel.border = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        legend.position = "none",
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  + ylim(c(0,2))
+
+## combine the plots and texts ######
+comb.plot = (plot_spacer() | note3 | note4 | note5 | note4 | note5 ) /
+(plot_spacer() | note6 | note7 ) / 
+(note1 |    plot1 |    plot2 |   plot3 |    plot4 |   plot5 )/
+(plot_spacer() | note8 | note9 ) / 
+(note2 |    plot6 |    plot7 |   plot8 |    plot9 |   plot10 ) + 
+  plot_layout(heights = c(3.8,2,10,2,10))
+  
+
+
+ggsave(comb.plot, width = 15, height = 12, filename = "Figure4.png")
+ggsave(comb.plot, width = 15, height = 12, filename = "Figure4.pdf")
+```
+
+
+![](Figure4.png)
+
+
+
+
+
+
+
